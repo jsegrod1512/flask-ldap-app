@@ -12,6 +12,9 @@ app.secret_key = "cámbiame"
 # --- Load Configuration ---
 from config import Config
 app.config.from_object(Config)
+# Ensure alias for LDAP_HOST if Config uses LDAP_SERVER
+if 'LDAP_SERVER' in app.config and 'LDAP_HOST' not in app.config:
+    app.config['LDAP_HOST'] = app.config['LDAP_SERVER']
 
 # --- Flask-Login Manager ---
 login_manager = LoginManager(app)
@@ -22,11 +25,12 @@ ldap_manager = LDAP3LoginManager(app)
 
 # --- User Model ---
 class User(UserMixin):
-    def __init__(self, dn, username, data, memberships):
+    def __init__(self, dn, username, data, memberships, role_id=None):
         self.dn = dn
         self.id = username
         self.data = data
-        self.memberships = memberships  # list of group DNs
+        self.memberships = memberships
+        self.role_id = role_id
 
 @login_manager.user_loader
 def load_user(user_id):
@@ -43,11 +47,15 @@ def roles_required(*roles):
     def wrapper(fn):
         @wraps(fn)
         def decorated_view(*args, **kwargs):
-            # Extract CNs from group DNs
             user_groups = [dn.split(',')[0].split('=')[1] for dn in current_user.memberships]
-            if not any(role in user_groups for role in roles):
-                abort(403)
-            return fn(*args, **kwargs)
+            role_map = {'Administradores':1, 'Desarrolladores':2, 'Clientes':3}
+            # check via LDAP groups
+            if any(role in user_groups for role in roles):
+                return fn(*args, **kwargs)
+            # check via role_id
+            if current_user.role_id and any(role_map.get(role)==current_user.role_id for role in roles):
+                return fn(*args, **kwargs)
+            abort(403)
         return decorated_view
     return wrapper
 
@@ -66,11 +74,9 @@ def register():
     if request.method == 'POST':
         u = request.form['username']
         p = request.form['password']
-        # Check LDAP user exists
         if not ldap_user_exists(u):
             flash('Ese usuario no existe en LDAP', 'danger')
             return redirect(url_for('register'))
-        # Register in MySQL with default role 'Cliente' (role_id = 3)
         con = db_conn()
         with con.cursor() as c:
             c.execute(
@@ -89,7 +95,16 @@ def login():
         try:
             result = ldap_manager.authenticate(u, p)
             if result.status == 'success':
-                login_user(result.user)
+                # Fetch role_id from MySQL
+                con = db_conn()
+                with con.cursor() as c:
+                    c.execute("SELECT role_id FROM user_app WHERE username=%s", (u,))
+                    row = c.fetchone()
+                role_id = row[0] if row else None
+                user = result.user
+                user.role_id = role_id
+                session['user_obj'] = user
+                login_user(user)
                 flash('Login OK', 'success')
                 return redirect(url_for('index'))
         except Exception:
@@ -107,7 +122,6 @@ def logout():
 @app.route('/')
 @login_required
 def index():
-    # Determine user groups
     groups = [dn.split(',')[0].split('=')[1] for dn in current_user.memberships]
     return render_template('index.html', groups=groups)
 
@@ -127,8 +141,8 @@ def dev_panel():
 @login_required
 @roles_required('Administradores')
 def admin_usuarios():
-    # 1) Fetch all LDAP users
-    server = Server(app.config['LDAP_SERVER'])
+    # 1) LDAP users
+    server = Server(app.config['LDAP_HOST'])
     conn = Connection(
         server,
         user=app.config['LDAP_BIND_DN'],
@@ -141,28 +155,27 @@ def admin_usuarios():
         search_scope=SUBTREE,
         attributes=['uid']
     )
-    ldap_uids = [entry.uid.value for entry in conn.entries]
+    ldap_uids = [e.uid.value for e in conn.entries]
     conn.unbind()
-
-    # 2) Fetch existing app users
+    # 2) existing in MySQL
     con = db_conn()
     with con.cursor() as c:
         c.execute("SELECT username FROM user_app")
-        existing = {row[0] for row in c.fetchall()}
-
-    # 3) Determine pending users
-    pending = sorted(uid for uid in ldap_uids if uid not in existing)
+        existing = {r[0] for r in c.fetchall()}
+    pending = sorted(u for u in ldap_uids if u not in existing)
 
     if request.method == 'POST':
         selected = request.form.getlist('uids')
         if not selected:
-            flash('No has seleccionado ningún usuario', 'warning')
+            flash('No ha seleccionado usuarios', 'warning')
             return redirect(url_for('admin_usuarios'))
+        # role selection from form
         with con.cursor() as c:
             for uid in selected:
+                role_id = int(request.form.get('role_id', 3))
                 c.execute(
                     "INSERT INTO user_app (username, password_hash, role_id) VALUES (%s, SHA2(%s,512), %s)",
-                    (uid, uid, 3)
+                    (uid, uid, role_id)
                 )
             con.commit()
         flash(f'Se han dado de alta {len(selected)} usuario(s)', 'success')
@@ -170,7 +183,7 @@ def admin_usuarios():
 
     return render_template('admin_usuarios.html', pending=pending)
 
-# --- LDAP helper ---
+# LDAP helper
 def ldap_user_exists(username):
     server = Server(app.config['LDAP_SERVER'])
     conn = Connection(
