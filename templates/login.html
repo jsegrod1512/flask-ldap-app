@@ -1,6 +1,14 @@
+{% with messages = get_flashed_messages(with_categories=true) %}
+  {% if messages %}
+    {% for category, msg in messages %}
+      <div class="alert alert-{{ category }}">{{ msg }}</div>
+    {% endfor %}
+  {% endif %}
+{% endwith %}
+
 <form method="post">
     <input name="username" placeholder="Usuario" required>
     <input name="password" type="password" placeholder="Contraseña" required>
     <button>Entrar</button>
-  </form>
+</form>
   
