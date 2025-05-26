@@ -125,7 +125,7 @@ def dev_panel():
 
 @app.route('/admin/usuarios', methods=['GET','POST'])
 @login_required
-@roles_required('Administrador')
+@roles_required('Administradores')
 def admin_usuarios():
     # 1) Fetch all LDAP users
     server = Server(app.config['LDAP_SERVER'])
