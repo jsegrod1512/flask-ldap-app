@@ -5,7 +5,8 @@ app = Flask(__name__)
 app.secret_key = "cámbiame"
 
 # --- Carga de config.py generado por Ansible ---
-app.config.from_pyfile('config.py')
+from config import Config
+app.config.from_object(Config)
 
 def ldap_bind(username, password):
     server = ldap3.Server(app.config['LDAP_SERVER'])
