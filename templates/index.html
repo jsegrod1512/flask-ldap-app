@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}Panel{% endblock %}
+{% block content %}
+<div class="text-center">
+  <h2>Bienvenido, {{ current_user.id }}!</h2>
+  <p>Selecciona una de las opciones disponibles:</p>
+  <div class="d-grid gap-2 col-6 mx-auto">
+    {% if 'Clientes' in groups %}
+      <a href="{{ url_for('cliente_panel') }}" class="btn btn-outline-primary">Panel Cliente</a>
+    {% endif %}
+    {% if 'Desarrolladores' in groups %}
+      <a href="{{ url_for('dev_panel') }}" class="btn btn-outline-secondary">Panel Desarrollador</a>
+    {% endif %}
+    {% if 'Administrador' in groups %}
+      <a href="{{ url_for('admin_usuarios') }}" class="btn btn-outline-danger">Gestión de Usuarios</a>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

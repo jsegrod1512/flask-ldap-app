@@ -1,3 +1,5 @@
 Flask
-ldap3
+flask-login
+flask-ldap3-login
 pymysql
+ldap3
