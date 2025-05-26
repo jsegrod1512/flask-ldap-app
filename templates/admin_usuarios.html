@@ -6,6 +6,16 @@
     <h3 class="mb-4">Dar de Alta Usuarios LDAP en la App</h3>
     {% if pending %}
       <form method="post">
+        <!-- Selector de rol -->
+        <div class="mb-4">
+          <label for="role_id" class="form-label">Asignar Rol:</label>
+          <select id="role_id" name="role_id" class="form-select" required>
+            <option value="1">Administrador</option>
+            <option value="2">Desarrollador</option>
+            <option value="3" selected>Cliente</option>
+          </select>
+        </div>
+        <!-- Tabla de usuarios pendientes -->
         <table class="table table-striped">
           <thead>
             <tr>
