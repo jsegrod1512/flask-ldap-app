@@ -1,22 +1,47 @@
 {% extends "base.html" %}
-{% block title %}Admin Usuarios{% endblock %}
+{% block title %}Gestión de Usuarios{% endblock %}
 {% block content %}
 <div class="row justify-content-center">
   <div class="col-md-8">
-    <h3 class="mb-4">Añadir Nuevo Usuario LDAP</h3>
-    <form method="post" class="row g-3">
-      <div class="col-md-6">
-        <label for="username" class="form-label">Usuario</label>
-        <input id="username" name="username" class="form-control" placeholder="uid" required>
+    <h3 class="mb-4">Dar de Alta Usuarios LDAP en la App</h3>
+    {% if pending %}
+      <form method="post">
+        <table class="table table-striped">
+          <thead>
+            <tr>
+              <th scope="col"><input type="checkbox" id="select-all"></th>
+              <th scope="col">Usuario (uid)</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for uid in pending %}
+            <tr>
+              <td>
+                <input type="checkbox" name="uids" value="{{ uid }}">
+              </td>
+              <td>{{ uid }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        <button type="submit" class="btn btn-success">
+          Dar de Alta Seleccionados
+        </button>
+      </form>
+    {% else %}
+      <div class="alert alert-info">
+        No hay usuarios pendientes de alta.
       </div>
-      <div class="col-md-6">
-        <label for="password" class="form-label">Contraseña</label>
-        <input id="password" name="password" type="password" class="form-control" placeholder="••••••••" required>
-      </div>
-      <div class="col-12">
-        <button type="submit" class="btn btn-danger">Crear Usuario</button>
-      </div>
-    </form>
+    {% endif %}
   </div>
 </div>
+
+<script>
+// Checkbox “Seleccionar todo”
+document.getElementById('select-all').addEventListener('change', function(e){
+  document.querySelectorAll('input[name="uids"]').forEach(cb => {
+    cb.checked = e.target.checked;
+  });
+});
+</script>
 {% endblock %}
