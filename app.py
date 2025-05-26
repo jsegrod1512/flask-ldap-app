@@ -111,34 +111,39 @@ def login():
     if request.method == 'POST':
         u, p = request.form['username'], request.form['password']
         try:
+            # 1) Autenticar contra LDAP
             result = ldap_manager.authenticate(u, p)
-            # DEBUG: muestro status en logs
-            app.logger.debug(f"LDAP auth status for {u}: {result.status}")
-            if result.status == 'success':
-                # Leer role_id
+            if result.status != 'success':
+                flash('Credenciales LDAP inválidas', 'danger')
+                return render_template('login.html')
+
+            # 2) Extraer grupos LDAP
+            ldap_groups = [dn.split(',')[0].split('=')[1] for dn in result.user.memberships]
+
+            # 3) Si es Administrador, le damos acceso directo:
+            if 'Administradores' in ldap_groups:
+                role_id = 1
+            else:
+                # 4) Para el resto, chequeamos en MySQL
                 con = db_conn()
                 with con.cursor() as c:
                     c.execute("SELECT role_id FROM user_app WHERE username=%s", (u,))
                     row = c.fetchone()
-                role_id = row[0] if row else None
+                if not row:
+                    flash('Debes solicitar tu alta al Administrador', 'warning')
+                    return render_template('login.html')
+                role_id = row[0]
 
-                # Completar objeto User y loguear
-                user = result.user
-                user.role_id = role_id
-                session['user_obj'] = user
-                login_user(user)
+            # 5) Completar objeto User y loguear
+            user = result.user
+            user.role_id = role_id
+            session['user_obj'] = user
+            login_user(user)
+            flash(f'Bienvenido, {u}!', 'success')
+            return redirect(url_for('index'))
 
-                flash('Login OK', 'success')
-                return redirect(url_for('index'))
-            else:
-                flash('Credenciales inválidas', 'danger')
-        except Exception as e:
-            app.logger.error(f"Error durante LDAP auth: {e}")
+        except Exception:
             flash('Error de autenticación', 'danger')
-
-        # Si llegamos aquí, recargamos la página de login
-        return render_template('login.html')
-
     return render_template('login.html')
 
 @app.route('/logout')
