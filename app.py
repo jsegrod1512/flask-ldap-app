@@ -65,7 +65,7 @@ from ldap3 import Server, Connection, SUBTREE
 
 def ldap_user_exists(username):
     """
-    Comprueba si un uid ya existe en LDAP bajo ou=Users.
+    Comprueba si un uid ya existe en LDAP bajo ou=People.
     """
     server = Server(app.config['LDAP_SERVER'])
     conn = Connection(
