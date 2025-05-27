@@ -19,10 +19,9 @@ logging.getLogger('ldap3').setLevel(logging.DEBUG)
 login_manager = LoginManager(app)
 login_manager.login_view = 'login'
 
-# LDAP3 Login
-ldap_manager = LDAP3LoginManager(app)
-# Disable automatic group finding
-ldap_manager.find_groups = False
+# Desactivamos busqueda grupos LDAP
+app.config.from_object('config.Config')
+ldap_manager = LDAP3LoginManager(app)  # ya leerá LDAP_FIND_GROUPS=False
 
 # --- User Model ---
 class User(UserMixin):
