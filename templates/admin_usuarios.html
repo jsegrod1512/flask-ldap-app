@@ -1,57 +1,51 @@
 {% extends "base.html" %}
 {% block title %}Gestión de Usuarios{% endblock %}
 {% block content %}
-<div class="row justify-content-center">
-  <div class="col-md-8">
-    <h3 class="mb-4">Dar de Alta Usuarios LDAP en la App</h3>
-    {% if pending %}
-      <form method="post">
-        <!-- Selector de rol -->
-        <div class="mb-4">
-          <label for="role_id" class="form-label">Asignar Rol:</label>
-          <select id="role_id" name="role_id" class="form-select" required>
-            <option value="1">Administrador</option>
-            <option value="2">Desarrollador</option>
-            <option value="3" selected>Cliente</option>
-          </select>
-        </div>
-        <!-- Tabla de usuarios pendientes -->
-        <table class="table table-striped">
-          <thead>
-            <tr>
-              <th scope="col"><input type="checkbox" id="select-all"></th>
-              <th scope="col">Usuario (uid)</th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for uid in pending %}
-            <tr>
-              <td>
-                <input type="checkbox" name="uids" value="{{ uid }}">
-              </td>
-              <td>{{ uid }}</td>
-            </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-        <button type="submit" class="btn btn-success">
-          Dar de Alta Seleccionados
-        </button>
-      </form>
-    {% else %}
-      <div class="alert alert-info">
-        No hay usuarios pendientes de alta.
-      </div>
-    {% endif %}
+<div class="row">
+  <div class="col-md-10 offset-md-1">
+    <h3>Administración de Usuarios de la App</h3>
+    <table class="table table-bordered mt-4">
+      <thead>
+        <tr>
+          <th>Usuario</th>
+          <th>Rol Actual</th>
+          <th>Fecha Alta</th>
+          <th>Acciones</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for u in users %}
+        <tr>
+          <td>{{ u.username }}</td>
+          <td>{{ u.role_id }}</td>
+          <td>{{ u.created_at }}</td>
+          <td>
+            <!-- Cambiar rol -->
+            <form method="post" class="d-inline">
+              <input type="hidden" name="action" value="change_role">
+              <input type="hidden" name="username" value="{{ u.username }}">
+              <select name="role_id" class="form-select d-inline w-auto">
+                {% for val, label in role_choices %}
+                  <option value="{{ val }}" {% if u.role_id == val %}selected{% endif %}>
+                    {{ label }}
+                  </option>
+                {% endfor %}
+              </select>
+              <button class="btn btn-sm btn-primary">Actualizar</button>
+            </form>
+            <!-- Eliminar usuario -->
+            <form method="post" class="d-inline ms-2">
+              <input type="hidden" name="action" value="delete">
+              <input type="hidden" name="username" value="{{ u.username }}">
+              <button class="btn btn-sm btn-danger" onclick="return confirm('Eliminar {{ u.username }}?')">
+                Eliminar
+              </button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
   </div>
 </div>
-
-<script>
-// Checkbox “Seleccionar todo”
-document.getElementById('select-all').addEventListener('change', function(e){
-  document.querySelectorAll('input[name="uids"]').forEach(cb => {
-    cb.checked = e.target.checked;
-  });
-});
-</script>
 {% endblock %}
