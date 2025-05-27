@@ -11,7 +11,7 @@
     {% if 'Desarrolladores' in groups %}
       <a href="{{ url_for('dev_panel') }}" class="btn btn-outline-secondary">Panel Desarrollador</a>
     {% endif %}
-    {% if 'Administrador' in groups %}
+    {% if 'Administradores' in groups %}
       <a href="{{ url_for('admin_usuarios') }}" class="btn btn-outline-danger">Gestión de Usuarios</a>
     {% endif %}
   </div>
