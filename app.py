@@ -52,22 +52,41 @@ def db_conn():
     )
 
 # --- Roles decorator ---
-def roles_required(*roles):
+def db_roles_required(*allowed_role_ids):
+    """
+    Permite acceso solo si current_user.role_id está en allowed_role_ids.
+    Ignora completamente los grupos LDAP.
+    """
     def wrapper(fn):
         @wraps(fn)
         def decorated(*args, **kwargs):
-            # nombres de grupos LDAP
-            user_roles = set(current_user.groups)
-            # añade el rol de la BD (traducido a string)
-            if current_user.role_id in ROLE_MAP:
-                user_roles.add(ROLE_MAP[current_user.role_id])
-
-            # ahora compruebo sólo strings
-            if any(r in user_roles for r in roles):
-                return fn(*args, **kwargs)
-            abort(403)
+            # Si no hay role_id o no está en la lista, 403
+            if not current_user.is_authenticated or \
+               current_user.role_id not in allowed_role_ids:
+                abort(403)
+            return fn(*args, **kwargs)
         return decorated
     return wrapper
+
+##################
+# Antiguos roles #
+#################
+# def roles_required(*roles):
+#     def wrapper(fn):
+#         @wraps(fn)
+#         def decorated(*args, **kwargs):
+#             # nombres de grupos LDAP
+#             user_roles = set(current_user.groups)
+#             # añade el rol de la BD (traducido a string)
+#             if current_user.role_id in ROLE_MAP:
+#                 user_roles.add(ROLE_MAP[current_user.role_id])
+
+#             # ahora compruebo sólo strings
+#             if any(r in user_roles for r in roles):
+#                 return fn(*args, **kwargs)
+#             abort(403)
+#         return decorated
+#     return wrapper
 
 # --- Routes ---
 @app.route('/login', methods=['GET', 'POST'])
@@ -186,7 +205,8 @@ def index():
 
 @app.route('/admin/usuarios', methods=['GET', 'POST'])
 @login_required
-@roles_required('Administradores')
+@db_roles_required(1)
+# @roles_required('Administradores')
 def admin_usuarios():
     db = db_conn()
 
@@ -263,13 +283,15 @@ def admin_usuarios():
 
 @app.route('/cliente')
 @login_required
-@roles_required('Clientes')
+@db_roles_required(3) 
+# @roles_required('Clientes')
 def cliente_panel():
     return render_template('cliente.html')
 
 @app.route('/desarrollador')
 @login_required
-@roles_required('Desarrolladores')
+@db_roles_required(2) 
+# @roles_required('Desarrolladores')
 def dev_panel():
     return render_template('desarrollador.html')
 
