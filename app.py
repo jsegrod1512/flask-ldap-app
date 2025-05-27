@@ -71,17 +71,45 @@ def login():
         p = request.form['password']
         app.logger.debug('+++ LOGIN POST para usuario: %s', u)
 
-        # 1) Autenticación LDAP
+                # 1) Autenticación LDAP MANUAL
         try:
-            res = ldap_manager.authenticate(u, p)
+            # Intentamos bind directo con las credenciales del usuario
+            server = Server(
+                app.config['LDAP_HOST'],
+                port=app.config['LDAP_PORT'],
+                use_ssl=app.config['LDAP_USE_SSL']
+            )
+            conn = Connection(
+                server,
+                user=f"uid={u},{app.config['LDAP_USER_DN']},{app.config['LDAP_BASE_DN']}",
+                password=p,
+                auto_bind=True
+            )
         except Exception:
-            flash('Error interno de autenticación', 'danger')
-            return render_template('login.html')
-        if res.status != 'success':
+            app.logger.warning('Credenciales LDAP inválidas para %s', u)
             flash('Credenciales LDAP inválidas', 'danger')
             return render_template('login.html')
 
         # 2) Búsqueda manual de grupos usando memberUid
+        try:
+            with conn:
+                base = f"{app.config['LDAP_GROUP_DN']},{app.config['LDAP_BASE_DN']}"
+                flt = f"(&(objectClass=posixGroup)(memberUid={u}))"
+                app.logger.info('📁 LDAP search base=%s filter=%s', base, flt)
+
+                found = conn.search(base, flt, SUBTREE, attributes=['cn'])
+                if not found or not conn.entries:
+                    app.logger.warning('❌ No se encontraron grupos para %s', u)
+                    groups = []
+                else:
+                    groups = [e.cn.value for e in conn.entries]
+                    app.logger.info('✅ Grupos encontrados: %s', groups)
+
+                flash(f"[DEBUG] grupos: {groups}", 'info')
+        except Exception:
+            app.logger.exception('💥 Error al buscar grupos LDAP')
+            flash('Error interno buscando tus grupos', 'danger')
+            return render_template('login.html')
         try:
             server = Server(
                 app.config['LDAP_HOST'],
