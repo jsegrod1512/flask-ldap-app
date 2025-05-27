@@ -9,18 +9,20 @@ from functools import wraps
 # --- App Setup ---
 app = Flask(__name__)
 app.config.from_object('config.Config')
-app.secret_key = app.config.get('SECRET_KEY')
+app.secret_key = app.config['SECRET_KEY']
 
 # Forzar nivel DEBUG en logger de la app
-debug_logger = app.logger
-debug_logger.setLevel(logging.DEBUG)
+default_log = logging.getLogger()
+default_log.setLevel(logging.DEBUG)
+app.logger.setLevel(logging.DEBUG)
 
-# Logging librerías LDAP
-logging.basicConfig(level=logging.DEBUG)
+# Logging librerías
 logging.getLogger('ldap3').setLevel(logging.DEBUG)
 
-# --- Extensiones ---
+# Inicializar extensión LDAP
 ldap_manager = LDAP3LoginManager(app)
+
+# Flask-Login
 login_manager = LoginManager(app)
 login_manager.login_view = 'login'
 
@@ -49,26 +51,25 @@ def db_conn():
         cursorclass=pymysql.cursors.DictCursor
     )
 
-# --- Decorador roles ---
+# --- Roles decorator ---
 def roles_required(*roles):
     def wrapper(fn):
         @wraps(fn)
         def decorated(*args, **kwargs):
-            if any(r in current_user.groups for r in roles):
-                return fn(*args, **kwargs)
-            if current_user.role_id and any(r == current_user.role_id for r in roles):
+            if any(r in current_user.groups for r in roles) or \
+               (current_user.role_id and any(r == current_user.role_id for r in roles)):
                 return fn(*args, **kwargs)
             abort(403)
         return decorated
     return wrapper
 
-# --- Rutas ---
-@app.route('/login', methods=['GET','POST'])
+# --- Routes ---
+@app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
         u = request.form['username']
         p = request.form['password']
-        debug_logger.info("+++ LOGIN POST para usuario: %s", u)
+        app.logger.debug('+++ LOGIN POST para usuario: %s', u)
 
         # 1) Autenticación LDAP
         try:
@@ -80,7 +81,7 @@ def login():
             flash('Credenciales LDAP inválidas', 'danger')
             return render_template('login.html')
 
-        # 2) Búsqueda manual de grupos
+        # 2) Búsqueda manual de grupos usando memberUid
         try:
             server = Server(
                 app.config['LDAP_HOST'],
@@ -95,21 +96,24 @@ def login():
             ) as conn:
                 base = f"{app.config['LDAP_GROUP_DN']},{app.config['LDAP_BASE_DN']}"
                 flt = f"(&(objectClass=posixGroup)(memberUid={u}))"
-                debug_logger.info("🔍 BUSCAR grupos: base=%s filter=%s", base, flt)
+                app.logger.info('📁 LDAP search base=%s filter=%s', base, flt)
+
                 found = conn.search(base, flt, SUBTREE, attributes=['cn'])
                 if not found or not conn.entries:
-                    debug_logger.warning("❌ Ningún grupo encontrado para %s", u)
+                    app.logger.warning('❌ No se encontraron grupos para %s', u)
                     groups = []
                 else:
                     groups = [e.cn.value for e in conn.entries]
-                    debug_logger.info("✅ Grupos: %s", groups)
-                flash(f"DEBUG: grupos encontrados → {groups}", 'info')
+                    app.logger.info('✅ Grupos encontrados: %s', groups)
+
+                # Mostrar en UI solo diagnóstico
+                flash(f"[DEBUG] grupos: {groups}", 'info')
         except Exception:
-            debug_logger.exception("Error en búsqueda LDAP manual")
-            flash('Error interno buscando grupos', 'danger')
+            app.logger.exception('💥 Error al buscar grupos LDAP')
+            flash('Error interno buscando tus grupos', 'danger')
             return render_template('login.html')
 
-        # 3) Determinar role_id
+        # 3) Determinar role_id y continuar
         if 'Administradores' in groups:
             role_id = 1
         else:
@@ -121,7 +125,7 @@ def login():
                 return render_template('login.html')
             role_id = row['role_id']
 
-        # 4) Login exitoso
+        # 4) Crear user, guardar sesión y login
         user = User(res.user_dn, u, groups, role_id)
         session['user_info'] = {
             'dn': res.user_dn,
@@ -142,10 +146,11 @@ def logout():
     flash('Sesión cerrada', 'info')
     return redirect(url_for('login'))
 
-@app.route('/register', methods=['GET','POST'])
+@app.route('/register', methods=['GET', 'POST'])
 def register():
     if request.method == 'POST':
         u = request.form['username'].strip()
+        # Verificar existencia en LDAP
         server = Server(app.config['LDAP_HOST'], port=app.config['LDAP_PORT'], use_ssl=app.config['LDAP_USE_SSL'])
         conn = Connection(server, user=app.config['LDAP_BIND_USER_DN'], password=app.config['LDAP_BIND_USER_PASSWORD'], auto_bind=True)
         conn.search(f"{app.config['LDAP_USER_DN']},{app.config['LDAP_BASE_DN']}", f"(uid={u})", SUBTREE, attributes=['uid'])
@@ -153,6 +158,7 @@ def register():
             flash('Usuario no existe', 'danger')
             return redirect(url_for('register'))
         conn.unbind()
+        # Alta en BD
         db = db_conn()
         with db.cursor() as c:
             c.execute('SELECT 1 FROM user_app WHERE username=%s', (u,))
@@ -170,7 +176,7 @@ def register():
 def index():
     return render_template('index.html', groups=current_user.groups)
 
-@app.route('/admin/usuarios', methods=['GET','POST'])
+@app.route('/admin/usuarios', methods=['GET', 'POST'])
 @login_required
 @roles_required('Administradores')
 def admin_usuarios():
@@ -179,11 +185,13 @@ def admin_usuarios():
     conn.search(f"{app.config['LDAP_USER_DN']},{app.config['LDAP_BASE_DN']}", '(uid=*)', SUBTREE, attributes=['uid'])
     ldap_uids = [e.uid.value for e in conn.entries]
     conn.unbind()
+
     db = db_conn()
     with db.cursor() as c:
         c.execute('SELECT username FROM user_app')
         existing = {r['username'] for r in c.fetchall()}
-    pending = [x for x in ldap_uids if x not in existing]
+    pending = [u for u in ldap_uids if u not in existing]
+
     if request.method == 'POST':
         sel = request.form.getlist('uids')
         rid = int(request.form.get('role_id', 3))
