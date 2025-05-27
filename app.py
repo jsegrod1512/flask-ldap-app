@@ -1,30 +1,29 @@
+import logging
 from flask import Flask, render_template, request, redirect, flash, url_for, session, abort
-from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
+from flask_login import (
+    LoginManager, UserMixin,
+    login_user, login_required,
+    logout_user, current_user
+)
 from flask_ldap3_login import LDAP3LoginManager
-from ldap3 import Server, Connection, SUBTREE
 import pymysql
 from functools import wraps
-from pymysql.err import IntegrityError
 
 # --- Application Setup ---
 app = Flask(__name__)
-# Debug
 
-import logging
+# Si arrancamos bajo Gunicorn, usar su logger
 if 'gunicorn.error' in logging.root.manager.loggerDict:
     gunicorn_logger = logging.getLogger('gunicorn.error')
     app.logger.handlers = gunicorn_logger.handlers
     app.logger.setLevel(gunicorn_logger.level)
 
-###
+# Clave secreta de Flask
 app.secret_key = "cámbiame"
 
 # --- Load Configuration ---
 from config import Config
 app.config.from_object(Config)
-# Alias for LDAP_HOST if necessary
-if 'LDAP_SERVER' in app.config and 'LDAP_HOST' not in app.config:
-    app.config['LDAP_HOST'] = app.config['LDAP_SERVER']
 
 # --- Flask-Login Manager ---
 login_manager = LoginManager(app)
@@ -48,7 +47,7 @@ def load_user(user_id):
 
 @ldap_manager.save_user
 def save_user(dn, username, data, memberships):
-    # Almacena temporalmente el objeto User en sesión
+    # Guarda el objeto user en sesión
     user = User(dn, username, data, memberships)
     session['user_obj'] = user
     return user
@@ -58,13 +57,24 @@ def roles_required(*roles):
     def wrapper(fn):
         @wraps(fn)
         def decorated_view(*args, **kwargs):
-            user_groups = [dn.split(',')[0].split('=')[1] for dn in current_user.memberships]
-            role_map = {'Administradores':1, 'Desarrolladores':2, 'Clientes':3}
-            # Comprueba grupos LDAP
+            # Extraer nombres de grupo de current_user.memberships
+            user_groups = [
+                dn.split(',')[0].split('=')[1]
+                for dn in current_user.memberships
+            ]
+            role_map = {
+                'Administradores': 1,
+                'Desarrolladores': 2,
+                'Clientes': 3
+            }
+            # 1) Permiso por grupo LDAP
             if any(r in user_groups for r in roles):
                 return fn(*args, **kwargs)
-            # Comprueba role_id de base de datos
-            if current_user.role_id and any(role_map.get(r)==current_user.role_id for r in roles):
+            # 2) Permiso por role_id en BD
+            if current_user.role_id and any(
+                role_map.get(r) == current_user.role_id
+                for r in roles
+            ):
                 return fn(*args, **kwargs)
             abort(403)
         return decorated_view
@@ -85,55 +95,42 @@ def register():
     if request.method == 'POST':
         u = request.form['username']
         p = request.form['password']
-
-        # 1) Comprobar existencia en LDAP
+        # 1) Verifico en LDAP que el usuario exista
         if not ldap_user_exists(u):
             flash('Ese usuario no existe en LDAP', 'danger')
             return redirect(url_for('register'))
-
+        # 2) Lo inserto en MySQL como Cliente (role_id=3)
         con = db_conn()
         with con.cursor() as c:
-            # 2) Comprobar duplicado en MySQL
             c.execute("SELECT 1 FROM user_app WHERE username=%s", (u,))
             if c.fetchone():
-                flash(f'El usuario {u} ya está registrado en la aplicación.', 'warning')
+                flash(f'El usuario {u} ya está registrado.', 'warning')
                 return redirect(url_for('register'))
-            # 3) Insertar nuevo registro
-            try:
-                c.execute(
-                    "INSERT INTO user_app (username, password_hash, role_id) "
-                    "VALUES (%s, SHA2(%s,512), %s)",
-                    (u, p, 3)  # role_id=3 (Cliente) por defecto
-                )
-                con.commit()
-            except IntegrityError:
-                flash(f'Error: el usuario {u} ya existe (integrity error).', 'warning')
-                return redirect(url_for('register'))
-
+            c.execute(
+                "INSERT INTO user_app (username, password_hash, role_id) "
+                "VALUES (%s, SHA2(%s,512), %s)",
+                (u, p, 3)
+            )
+            con.commit()
         flash('Usuario creado en la base de datos', 'success')
         return redirect(url_for('login'))
-
     return render_template('register.html')
 
 @app.route('/login', methods=['GET','POST'])
 def login():
     if request.method == 'POST':
         u, p = request.form['username'], request.form['password']
-        app.logger.debug(f"Inicio de POST /login para usuario={u}")
-
+        app.logger.debug(f"Inicio POST /login para usuario={u}")
         try:
             app.logger.debug("Llamando a ldap_manager.authenticate()")
             result = ldap_manager.authenticate(u, p)
-            # Aquí ya no usamos result.result, sino los atributos correctos
             app.logger.debug(
                 f"LDAP auth → status={result.status}, "
-                f"user_id={result.user_id}, "
-                f"user_dn={result.user_dn}, "
-                f"user_groups={result.user_groups}, "
-                f"user_info={result.user_info}"
+                f"user_id={result.user_id}, user_dn={result.user_dn}, "
+                f"user_groups={result.user_groups}"
             )
         except Exception:
-            app.logger.exception("Excepción al ejecutar authenticate()")
+            app.logger.exception("Excepción en authenticate()")
             flash('Error interno durante autenticación', 'danger')
             return render_template('login.html')
 
@@ -141,23 +138,27 @@ def login():
             flash('Credenciales LDAP inválidas', 'danger')
             return render_template('login.html')
 
-        # 3) Continua con la extracción de grupos y login_user…
-        ldap_groups = [dn.split(',')[0].split('=')[1] for dn in result.user_groups]
+        # Extraer grupos
+        ldap_groups = [
+            name for name in result.user_groups
+        ]
 
-        # 4) Asignar role_id
+        # Determinar role_id
         if 'Administradores' in ldap_groups:
             role_id = 1
         else:
             con = db_conn()
             with con.cursor() as c:
-                c.execute("SELECT role_id FROM user_app WHERE username=%s", (u,))
+                c.execute(
+                    "SELECT role_id FROM user_app WHERE username=%s", (u,)
+                )
                 row = c.fetchone()
             if not row:
                 flash('Debes solicitar tu alta al Administrador', 'warning')
                 return render_template('login.html')
             role_id = row[0]
 
-        # 5) Loguear usuario
+        # Loguear
         user = result.user
         user.role_id = role_id
         session['user_obj'] = user
@@ -178,7 +179,10 @@ def logout():
 @app.route('/')
 @login_required
 def index():
-    groups = [dn.split(',')[0].split('=')[1] for dn in current_user.memberships]
+    groups = [
+        dn.split(',')[0].split('=')[1]
+        for dn in current_user.memberships
+    ]
     return render_template('index.html', groups=groups)
 
 @app.route('/cliente')
@@ -197,16 +201,16 @@ def dev_panel():
 @login_required
 @roles_required('Administradores')
 def admin_usuarios():
-    # 1) Obtener todos los usuarios LDAP
+    # Buscar todos los uid en LDAP
     server = Server(app.config['LDAP_HOST'])
     conn = Connection(
         server,
-        user=app.config['LDAP_BIND_DN'],
-        password=app.config['LDAP_BIND_PW'],
+        user=app.config['LDAP_BIND_USER_DN'],
+        password=app.config['LDAP_BIND_USER_PASSWORD'],
         auto_bind=True
     )
     conn.search(
-        search_base=app.config['LDAP_USER_DN'],
+        search_base=f"{app.config['LDAP_USER_DN']},{app.config['LDAP_BASE_DN']}",
         search_filter='(uid=*)',
         search_scope=SUBTREE,
         attributes=['uid']
@@ -214,12 +218,11 @@ def admin_usuarios():
     ldap_uids = [e.uid.value for e in conn.entries]
     conn.unbind()
 
-    # 2) Usuarios ya en MySQL
+    # Filtrar los que aún no están en MySQL
     con = db_conn()
     with con.cursor() as c:
         c.execute("SELECT username FROM user_app")
         existing = {r[0] for r in c.fetchall()}
-
     pending = sorted(u for u in ldap_uids if u not in existing)
 
     if request.method == 'POST':
@@ -231,7 +234,8 @@ def admin_usuarios():
         with con.cursor() as c:
             for uid in selected:
                 c.execute(
-                    "INSERT IGNORE INTO user_app (username, password_hash, role_id) "
+                    "INSERT IGNORE INTO user_app "
+                    "(username, password_hash, role_id) "
                     "VALUES (%s, SHA2(%s,512), %s)",
                     (uid, uid, role_id)
                 )
@@ -246,12 +250,12 @@ def ldap_user_exists(username):
     server = Server(app.config['LDAP_HOST'])
     conn = Connection(
         server,
-        user=app.config['LDAP_BIND_DN'],
-        password=app.config['LDAP_BIND_PW'],
+        user=app.config['LDAP_BIND_USER_DN'],
+        password=app.config['LDAP_BIND_USER_PASSWORD'],
         auto_bind=True
     )
     conn.search(
-        app.config['LDAP_USER_DN'],
+        f"{app.config['LDAP_USER_DN']},{app.config['LDAP_BASE_DN']}",
         f'(uid={username})',
         search_scope=SUBTREE,
         attributes=['uid']
@@ -262,13 +266,3 @@ def ldap_user_exists(username):
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=8080)
-
-import logging
-
-if __name__ != '__main__':
-    # Obtén el logger que Gunicorn configura automáticamente
-    gunicorn_logger = logging.getLogger('gunicorn.error')
-    # Reemplaza los handlers de Flask con los de Gunicorn
-    app.logger.handlers = gunicorn_logger.handlers  # :contentReference[oaicite:0]{index=0}
-    # Alinea el nivel de logging de tu app al nivel de Gunicorn
-    app.logger.setLevel(gunicorn_logger.level)      # :contentReference[oaicite:1]{index=1}
