@@ -175,7 +175,49 @@ def index():
 @login_required
 @roles_required('Administradores')
 def admin_usuarios():
-    server = Server(app.config['LDAP_HOST'], port=app.config['LDAP_PORT'], use_ssl=app.config['LDAP_USE_SSL'])
+    db = db_conn()
+
+    # --- POST: alta, cambio de rol o borrado ---
+    if request.method == 'POST':
+        action = request.form.get('action')
+        username = request.form.get('username')
+        with db.cursor() as c:
+            if action == 'add':  # dar de alta pendientes
+                uids = request.form.getlist('uids')
+                rid  = int(request.form.get('role_id', 3))
+                for uid in uids:
+                    c.execute(
+                        'INSERT IGNORE INTO user_app(username,role_id) VALUES(%s,%s)',
+                        (uid, rid)
+                    )
+                flash(f'{len(uids)} usuarios dados de alta', 'success')
+
+            elif action == 'change_role':  # actualizar rol
+                new_rid = int(request.form.get('role_id'))
+                c.execute(
+                    'UPDATE user_app SET role_id=%s WHERE username=%s',
+                    (new_rid, username)
+                )
+                flash(f'Rol de {username} actualizado a {new_rid}', 'info')
+
+            elif action == 'delete':  # eliminación
+                c.execute(
+                    'DELETE FROM user_app WHERE username=%s',
+                    (username,)
+                )
+                flash(f'Usuario {username} eliminado', 'warning')
+
+            else:
+                flash('Acción no reconocida', 'danger')
+
+            db.commit()
+        return redirect(url_for('admin_usuarios'))
+
+    # --- GET: obtenemos LDAP uids para pendientes ---
+    # (igual que antes)
+    server = Server(app.config['LDAP_HOST'],
+                    port=app.config['LDAP_PORT'],
+                    use_ssl=app.config['LDAP_USE_SSL'])
     conn = Connection(server,
                       user=app.config['LDAP_BIND_USER_DN'],
                       password=app.config['LDAP_BIND_USER_PASSWORD'],
@@ -185,25 +227,26 @@ def admin_usuarios():
     ldap_uids = [e.uid.value for e in conn.entries]
     conn.unbind()
 
-    db = db_conn()
+    # obtenemos los ya existentes
     with db.cursor() as c:
-        c.execute('SELECT username FROM user_app')
-        existing = {r['username'] for r in c.fetchall()}
-    pending = [u for u in ldap_uids if u not in existing]
+        c.execute('SELECT username, role_id, created_at FROM user_app')
+        users = c.fetchall()
 
-    if request.method == 'POST':
-        sel = request.form.getlist('uids')
-        rid = int(request.form.get('role_id', 3))
-        if not sel:
-            flash('Nada seleccionado', 'warning')
-            return redirect(url_for('admin_usuarios'))
-        with db.cursor() as c:
-            for uid in sel:
-                c.execute('INSERT IGNORE INTO user_app(username,role_id) VALUES(%s,%s)', (uid, rid))
-            db.commit()
-        flash(f'{len(sel)} usuarios dados de alta', 'success')
-        return redirect(url_for('admin_usuarios'))
-    return render_template('admin_usuarios.html', pending=pending)
+    existing = {u['username'] for u in users}
+    pending  = [u for u in ldap_uids if u not in existing]
+
+    # definimos las opciones de rol (ajusta labels/ids a tu modelo)
+    role_choices = [
+        (1, 'Administrador'),
+        (2, 'Desarrollador'),
+        (3, 'Cliente'),
+    ]
+
+    return render_template('admin_usuarios.html',
+                           users=users,
+                           pending=pending,
+                           role_choices=role_choices)
+
 
 @app.route('/cliente')
 @login_required
