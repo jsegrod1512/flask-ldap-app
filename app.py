@@ -102,6 +102,9 @@ def login():
             else:
                 groups = [entry.cn.value for entry in conn.entries]
                 app.logger.debug("LDAP SEARCH ENTRIES → %s", groups)
+                
+            # <<< AÑADE ESTO justo aquí para ver en la UI:
+            flash(f"DEBUG: grupos LDAP encontrados → {groups}", 'info')
 
             conn.unbind()
         except Exception:
