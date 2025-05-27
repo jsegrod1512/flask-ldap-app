@@ -11,11 +11,11 @@ app = Flask(__name__)
 # Debug
 
 import logging
-# Si corremos bajo Gunicorn:
 if 'gunicorn.error' in logging.root.manager.loggerDict:
     gunicorn_logger = logging.getLogger('gunicorn.error')
     app.logger.handlers = gunicorn_logger.handlers
     app.logger.setLevel(gunicorn_logger.level)
+
 
 
 ###
@@ -125,9 +125,9 @@ def login():
         app.logger.debug(f"Intentando authenticate() para usuario={u}")
         try:
             # 1) Autenticar contra LDAP
-            # debug
-            app.logger.debug(f"Resultado LDAP: status={result.status}, info={result.result}")
+            app.logger.debug(f"Inicio de POST /login para usuario={u}")
             result = ldap_manager.authenticate(u, p)
+            app.logger.debug(f"Resultado LDAP: status={result.status}, info={result.result}")
             if result.status != 'success':
                 flash('Credenciales LDAP inválidas', 'danger')
                 return render_template('login.html')
