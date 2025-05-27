@@ -8,6 +8,17 @@ from pymysql.err import IntegrityError
 
 # --- Application Setup ---
 app = Flask(__name__)
+# Debug
+
+import logging
+# Si corremos bajo Gunicorn:
+if 'gunicorn.error' in logging.root.manager.loggerDict:
+    gunicorn_logger = logging.getLogger('gunicorn.error')
+    app.logger.handlers = gunicorn_logger.handlers
+    app.logger.setLevel(gunicorn_logger.level)
+
+
+###
 app.secret_key = "cámbiame"
 
 # --- Load Configuration ---
