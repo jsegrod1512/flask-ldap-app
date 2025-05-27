@@ -21,6 +21,8 @@ login_manager.login_view = 'login'
 
 # LDAP3 Login
 ldap_manager = LDAP3LoginManager(app)
+# Disable automatic group finding
+ldap_manager.find_groups = False
 
 # --- User Model ---
 class User(UserMixin):
@@ -54,7 +56,7 @@ def roles_required(*roles):
         def decorated(*args, **kwargs):
             if any(r in current_user.groups for r in roles):
                 return fn(*args, **kwargs)
-            if current_user.role_id and any(r==current_user.role_id for r in roles):
+            if current_user.role_id and any(r == current_user.role_id for r in roles):
                 return fn(*args, **kwargs)
             abort(403)
         return decorated
