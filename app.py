@@ -155,7 +155,18 @@ def login():
         }
         login_user(user)
         flash(f'Bienvenido, {u}!', 'success')
+
+        # Redirijo según el rol de BD
+        if user.role_id == 1:
+            return redirect(url_for('admin_usuarios'))
+        elif user.role_id == 2:
+            return redirect(url_for('dev_panel'))
+        elif user.role_id == 3:
+            return redirect(url_for('cliente_panel'))
+
+        # Si no encaja en ninguno (por si acaso) va al índice
         return redirect(url_for('index'))
+
 
     return render_template('login.html')
 
