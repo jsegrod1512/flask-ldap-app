@@ -11,7 +11,10 @@ app = Flask(__name__)
 app.config.from_object('config.Config')
 app.secret_key = app.config.get('SECRET_KEY')
 
-# Logging
+# Forzar que el logger de la app acepte DEBUG
+app.logger.setLevel(logging.DEBUG)
+
+# Logging de librerías LDAP
 logging.basicConfig(level=logging.DEBUG)
 logging.getLogger('ldap3').setLevel(logging.DEBUG)
 
@@ -93,7 +96,7 @@ def login():
 
             base = f"{app.config['LDAP_GROUP_DN']},{app.config['LDAP_BASE_DN']}"
             flt  = f"(&(objectClass=posixGroup)(memberUid={u}))"
-            app.logger.debug("MANUAL LDAP SEARCH → base=%s, filter=%s", base, flt)
+            app.logger.info("MANUAL LDAP SEARCH → base=%s, filter=%s", base, flt)
 
             ok = conn.search(base, flt, SUBTREE, attributes=['cn'])
             if not ok:
@@ -101,8 +104,8 @@ def login():
                 groups = []
             else:
                 groups = [entry.cn.value for entry in conn.entries]
-                app.logger.debug("LDAP SEARCH ENTRIES → %s", groups)
-                
+                app.logger.info("LDAP SEARCH ENTRIES → %s", groups)
+
             # <<< AÑADE ESTO justo aquí para ver en la UI:
             flash(f"DEBUG: grupos LDAP encontrados → {groups}", 'info')
 
