@@ -239,11 +239,5 @@ def ldap_user_exists(username):
     conn.unbind()
     return exists
 
-# Entorno de pruebas
-
-import logging
-logging.getLogger('flask_ldap3_login').setLevel(logging.DEBUG)
-app.logger.setLevel(logging.DEBUG)
-
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=8080)
