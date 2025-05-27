@@ -65,37 +65,58 @@ def roles_required(*roles):
 @app.route('/login', methods=['GET','POST'])
 def login():
     if request.method == 'POST':
-        u = request.form['username']; p = request.form['password']
+        u = request.form['username']
+        p = request.form['password']
+
+        # 1) Autenticación LDAP
         try:
             res = ldap_manager.authenticate(u, p)
         except Exception:
-            flash('Error interno','danger'); return render_template('login.html')
-        if res.status!='success':
-            flash('Credenciales inválidas','danger'); return render_template('login.html')
-        # Manual group fetch
-        server=Server(app.config['LDAP_HOST'], port=app.config['LDAP_PORT'], use_ssl=app.config['LDAP_USE_SSL'])
-        conn=Connection(server, user=app.config['LDAP_BIND_USER_DN'], password=app.config['LDAP_BIND_USER_PASSWORD'], auto_bind=True)
-        search_base=f"{app.config['LDAP_GROUP_DN']},{app.config['LDAP_BASE_DN']}"
-        search_filter=f"(&(objectClass=posixGroup)(memberUid={u}))"
-        conn.search(search_base, search_filter, SUBTREE, attributes=['cn'])
-        groups=[e.cn.value for e in conn.entries]
+            flash('Error interno de autenticación', 'danger')
+            return render_template('login.html')
+        if res.status != 'success':
+            flash('Credenciales LDAP inválidas', 'danger')
+            return render_template('login.html')
+
+        # 2) Búsqueda manual de grupos usando memberUid
+        server = Server(app.config['LDAP_HOST'],
+                        port=app.config['LDAP_PORT'],
+                        use_ssl=app.config['LDAP_USE_SSL'])
+        conn = Connection(server,
+                          user=app.config['LDAP_BIND_USER_DN'],
+                          password=app.config['LDAP_BIND_USER_PASSWORD'],
+                          auto_bind=True)
+
+        base = f"{app.config['LDAP_GROUP_DN']},{app.config['LDAP_BASE_DN']}"
+        flt  = f"(&(objectClass=posixGroup)(memberUid={u}))"
+        conn.search(base, flt, SUBTREE, attributes=['cn'])
+        groups = [e.cn.value for e in conn.entries]
         conn.unbind()
-        # Determine role
+
+        # 3) Determinar role_id
         if 'Administradores' in groups:
-            role_id=1
+            role_id = 1
         else:
-            db=db_conn();
-            with db.cursor() as c:
-                c.execute('SELECT role_id FROM user_app WHERE username=%s',(u,))
-                row=c.fetchone()
-            if not row: flash('Solicita alta al administrador','warning'); return render_template('login.html')
-            role_id=row['role_id']
-        # Login
-        user=User(res.user_dn, u, groups, role_id)
-        session['user_info']={'dn':res.user_dn,'username':u,'groups':groups,'role_id':role_id}
+            with db_conn().cursor() as c:
+                c.execute('SELECT role_id FROM user_app WHERE username=%s', (u,))
+                row = c.fetchone()
+            if not row:
+                flash('Solicita tu alta al administrador', 'warning')
+                return render_template('login.html')
+            role_id = row['role_id']
+
+        # 4) Crear user, guardar sesión y login
+        user = User(res.user_dn, u, groups, role_id)
+        session['user_info'] = {
+            'dn': res.user_dn,
+            'username': u,
+            'groups': groups,
+            'role_id': role_id
+        }
         login_user(user)
-        flash(f'Bienvenido,{u}!','success')
+        flash(f'Bienvenido, {u}!', 'success')
         return redirect(url_for('index'))
+
     return render_template('login.html')
 
 @app.route('/logout')
