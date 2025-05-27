@@ -121,25 +121,28 @@ def login():
         u, p = request.form['username'], request.form['password']
         app.logger.debug(f"Inicio de POST /login para usuario={u}")
 
-        # 1) Intento de autenticación LDAP
         try:
             app.logger.debug("Llamando a ldap_manager.authenticate()")
             result = ldap_manager.authenticate(u, p)
-            app.logger.debug(f"authenticate() devolvió: {result}")
-        except Exception as e:
-            # Este traceback irá al mismo handler que Gunicorn
+            # Aquí ya no usamos result.result, sino los atributos correctos
+            app.logger.debug(
+                f"LDAP auth → status={result.status}, "
+                f"user_id={result.user_id}, "
+                f"user_dn={result.user_dn}, "
+                f"user_groups={result.user_groups}, "
+                f"user_info={result.user_info}"
+            )
+        except Exception:
             app.logger.exception("Excepción al ejecutar authenticate()")
             flash('Error interno durante autenticación', 'danger')
             return render_template('login.html')
 
-        # 2) Comprueba el status devuelto
-        app.logger.debug(f"Resultado LDAP: status={result.status}, info={result.result}")
         if result.status != 'success':
             flash('Credenciales LDAP inválidas', 'danger')
             return render_template('login.html')
 
-        # 3) Extraer grupos LDAP
-        ldap_groups = [dn.split(',')[0].split('=')[1] for dn in result.user.memberships]
+        # 3) Continua con la extracción de grupos y login_user…
+        ldap_groups = [dn.split(',')[0].split('=')[1] for dn in result.user_groups]
 
         # 4) Asignar role_id
         if 'Administradores' in ldap_groups:
