@@ -80,40 +80,41 @@ def login():
             flash('Credenciales LDAP inválidas', 'danger')
             return render_template('login.html')
 
-        # 2) Búsqueda manual de grupos usando memberUid
+        # 2) (REFRACTOR) Búsqueda de grupos con conexión única y logs inmediatos
         try:
-            server = Server(
-                app.config['LDAP_HOST'],
-                port=app.config['LDAP_PORT'],
-                use_ssl=app.config['LDAP_USE_SSL']
-            )
-            conn = Connection(
-                server,
-                user=app.config['LDAP_BIND_USER_DN'],
-                password=app.config['LDAP_BIND_USER_PASSWORD'],
-                auto_bind=True
-            )
+            server = Server(app.config['LDAP_HOST'],
+                            port=app.config['LDAP_PORT'],
+                            use_ssl=app.config['LDAP_USE_SSL'])
+            # Usamos el bind-admin para buscar grupos:
+            with Connection(server,
+                            user=app.config['LDAP_BIND_USER_DN'],
+                            password=app.config['LDAP_BIND_USER_PASSWORD'],
+                            auto_bind=True) as conn:
+                # Determinamos DN del usuario autenticado:
+                user_dn = res.user_dn
+                app.logger.info("🔍 Buscando grupos de %s (DN=%s)", u, user_dn)
 
-            base = f"{app.config['LDAP_GROUP_DN']},{app.config['LDAP_BASE_DN']}"
-            flt  = f"(&(objectClass=posixGroup)(memberUid={u}))"
-            app.logger.info("MANUAL LDAP SEARCH → base=%s, filter=%s", base, flt)
+                # Filtramos grupos posixGroup que contengan el uid
+                base = f"{app.config['LDAP_GROUP_DN']},{app.config['LDAP_BASE_DN']}"
+                flt  = f"(&(objectClass=posixGroup)(memberUid={u}))"
+                app.logger.info("📁 LDAP search base=%s filter=%s", base, flt)
 
-            ok = conn.search(base, flt, SUBTREE, attributes=['cn'])
-            if not ok:
-                app.logger.error("LDAP SEARCH FAILED: %s", conn.result)
-                groups = []
-            else:
-                groups = [entry.cn.value for entry in conn.entries]
-                app.logger.info("LDAP SEARCH ENTRIES → %s", groups)
+                found = conn.search(base, flt, SUBTREE, attributes=['cn'])
+                if not found or not conn.entries:
+                    app.logger.warning("❌ No se encontraron grupos para %s", u)
+                    groups = []
+                else:
+                    groups = [e.cn.value for e in conn.entries]
+                    app.logger.info("✅ Grupos encontrados: %s", groups)
 
-            # <<< AÑADE ESTO justo aquí para ver en la UI:
-            flash(f"DEBUG: grupos LDAP encontrados → {groups}", 'info')
+                # Mostramos en pantalla para asegurar diagnóstico
+                flash(f"[DEBUG] grupos: {groups}", 'info')
 
-            conn.unbind()
-        except Exception:
-            app.logger.exception("Error en búsqueda LDAP manual")
-            flash('Error interno al buscar grupos', 'danger')
+        except Exception as e:
+            app.logger.exception("💥 Error al buscar grupos LDAP")
+            flash('Error interno buscando tus grupos', 'danger')
             return render_template('login.html')
+
 
 
         # 3) Determinar role_id
