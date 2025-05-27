@@ -241,3 +241,13 @@ def ldap_user_exists(username):
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=8080)
+
+import logging
+
+if __name__ != '__main__':
+    # Obtén el logger que Gunicorn configura automáticamente
+    gunicorn_logger = logging.getLogger('gunicorn.error')
+    # Reemplaza los handlers de Flask con los de Gunicorn
+    app.logger.handlers = gunicorn_logger.handlers  # :contentReference[oaicite:0]{index=0}
+    # Alinea el nivel de logging de tu app al nivel de Gunicorn
+    app.logger.setLevel(gunicorn_logger.level)      # :contentReference[oaicite:1]{index=1}
