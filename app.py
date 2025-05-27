@@ -15,13 +15,12 @@ app.secret_key = app.config.get('SECRET_KEY')
 logging.basicConfig(level=logging.DEBUG)
 logging.getLogger('ldap3').setLevel(logging.DEBUG)
 
+# Desactivamos busqueda grupos LDAP
+ldap_manager = LDAP3LoginManager(app)  # ya leerá LDAP_FIND_GROUPS=False
+
 # Flask-Login
 login_manager = LoginManager(app)
 login_manager.login_view = 'login'
-
-# Desactivamos busqueda grupos LDAP
-app.config.from_object('config.Config')
-ldap_manager = LDAP3LoginManager(app)  # ya leerá LDAP_FIND_GROUPS=False
 
 # --- User Model ---
 class User(UserMixin):
