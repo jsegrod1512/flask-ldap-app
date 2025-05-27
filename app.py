@@ -16,8 +16,6 @@ if 'gunicorn.error' in logging.root.manager.loggerDict:
     app.logger.handlers = gunicorn_logger.handlers
     app.logger.setLevel(gunicorn_logger.level)
 
-
-
 ###
 app.secret_key = "cámbiame"
 
@@ -121,44 +119,49 @@ def register():
 def login():
     if request.method == 'POST':
         u, p = request.form['username'], request.form['password']
-        # debug
-        app.logger.debug(f"Intentando authenticate() para usuario={u}")
+        app.logger.debug(f"Inicio de POST /login para usuario={u}")
+
+        # 1) Intento de autenticación LDAP
         try:
-            # 1) Autenticar contra LDAP
-            app.logger.debug(f"Inicio de POST /login para usuario={u}")
+            app.logger.debug("Llamando a ldap_manager.authenticate()")
             result = ldap_manager.authenticate(u, p)
-            app.logger.debug(f"Resultado LDAP: status={result.status}, info={result.result}")
-            if result.status != 'success':
-                flash('Credenciales LDAP inválidas', 'danger')
+            app.logger.debug(f"authenticate() devolvió: {result}")
+        except Exception as e:
+            # Este traceback irá al mismo handler que Gunicorn
+            app.logger.exception("Excepción al ejecutar authenticate()")
+            flash('Error interno durante autenticación', 'danger')
+            return render_template('login.html')
+
+        # 2) Comprueba el status devuelto
+        app.logger.debug(f"Resultado LDAP: status={result.status}, info={result.result}")
+        if result.status != 'success':
+            flash('Credenciales LDAP inválidas', 'danger')
+            return render_template('login.html')
+
+        # 3) Extraer grupos LDAP
+        ldap_groups = [dn.split(',')[0].split('=')[1] for dn in result.user.memberships]
+
+        # 4) Asignar role_id
+        if 'Administradores' in ldap_groups:
+            role_id = 1
+        else:
+            con = db_conn()
+            with con.cursor() as c:
+                c.execute("SELECT role_id FROM user_app WHERE username=%s", (u,))
+                row = c.fetchone()
+            if not row:
+                flash('Debes solicitar tu alta al Administrador', 'warning')
                 return render_template('login.html')
+            role_id = row[0]
 
-            # 2) Extraer grupos LDAP
-            ldap_groups = [dn.split(',')[0].split('=')[1] for dn in result.user.memberships]
+        # 5) Loguear usuario
+        user = result.user
+        user.role_id = role_id
+        session['user_obj'] = user
+        login_user(user)
+        flash(f'Bienvenido, {u}!', 'success')
+        return redirect(url_for('index'))
 
-            # 3) Si es Administrador, le damos acceso directo:
-            if 'Administradores' in ldap_groups:
-                role_id = 1
-            else:
-                # 4) Para el resto, chequeamos en MySQL
-                con = db_conn()
-                with con.cursor() as c:
-                    c.execute("SELECT role_id FROM user_app WHERE username=%s", (u,))
-                    row = c.fetchone()
-                if not row:
-                    flash('Debes solicitar tu alta al Administrador', 'warning')
-                    return render_template('login.html')
-                role_id = row[0]
-
-            # 5) Completar objeto User y loguear
-            user = result.user
-            user.role_id = role_id
-            session['user_obj'] = user
-            login_user(user)
-            flash(f'Bienvenido, {u}!', 'success')
-            return redirect(url_for('index'))
-
-        except Exception:
-            flash('Error de autenticación', 'danger')
     return render_template('login.html')
 
 @app.route('/logout')
