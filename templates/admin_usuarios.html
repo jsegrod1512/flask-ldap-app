@@ -4,6 +4,8 @@
 <div class="row">
   <div class="col-md-10 offset-md-1">
     <h3>Administración de Usuarios de la App</h3>
+
+    <!-- 1) Tabla de usuarios ya dados de alta -->
     <table class="table table-bordered mt-4">
       <thead>
         <tr>
@@ -37,7 +39,8 @@
             <form method="post" class="d-inline ms-2">
               <input type="hidden" name="action" value="delete">
               <input type="hidden" name="username" value="{{ u.username }}">
-              <button class="btn btn-sm btn-danger" onclick="return confirm('Eliminar {{ u.username }}?')">
+              <button class="btn btn-sm btn-danger"
+                      onclick="return confirm('Eliminar {{ u.username }}?')">
                 Eliminar
               </button>
             </form>
@@ -46,6 +49,60 @@
         {% endfor %}
       </tbody>
     </table>
+
+    <!-- 2) Sección de usuarios pendientes -->
+    {% if pending %}
+    <h4 class="mt-5">Usuarios pendientes de alta</h4>
+    <form method="post">
+      <!-- indica que esta acción es 'add' -->
+      <input type="hidden" name="action" value="add">
+      <table class="table table-striped mt-3">
+        <thead>
+          <tr>
+            <th scope="col"><input type="checkbox" id="select_all" 
+                  onclick="document.querySelectorAll('.chk').forEach(c=>c.checked=this.checked)"></th>
+            <th scope="col">Usuario</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for u in pending %}
+          <tr>
+            <td>
+              <input type="checkbox" name="uids" value="{{ u }}" class="chk">
+            </td>
+            <td>{{ u }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+
+      <!-- Selector de rol para todos los nuevos -->
+      <div class="mb-3 w-auto">
+        <label for="role_add" class="form-label">Rol a asignar:</label>
+        <select name="role_id" id="role_add" class="form-select w-auto">
+          {% for val, label in role_choices %}
+            <option value="{{ val }}">{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <button type="submit" class="btn btn-success">
+        Dar de alta seleccionados
+      </button>
+    </form>
+    {% else %}
+      <p class="text-muted mt-4">No hay usuarios pendientes.</p>
+    {% endif %}
+
   </div>
 </div>
+
+<!-- JS para el “select all” -->
+<script>
+  // Mantén simple el JS inline para este caso
+  document.getElementById('select_all')?.addEventListener('change', function() {
+    document.querySelectorAll('.chk').forEach(c => c.checked = this.checked);
+  });
+</script>
+
 {% endblock %}
