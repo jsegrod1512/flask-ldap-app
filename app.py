@@ -80,7 +80,6 @@ def db_roles_required(*allowed_role_ids):
 #             # añade el rol de la BD (traducido a string)
 #             if current_user.role_id in ROLE_MAP:
 #                 user_roles.add(ROLE_MAP[current_user.role_id])
-
 #             # ahora compruebo sólo strings
 #             if any(r in user_roles for r in roles):
 #                 return fn(*args, **kwargs)

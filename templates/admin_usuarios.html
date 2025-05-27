@@ -19,7 +19,13 @@
         {% for u in users %}
         <tr>
           <td>{{ u.username }}</td>
-          <td>{{ role_map[u.role_id] }}</td>         
+          <td>
+            {% for val, label in role_choices %}
+              {% if u.role_id == val %}
+                {{ label }}
+              {% endif %}
+            {% endfor %}
+          </td>          
           <td>{{ u.created_at }}</td>
           <td>
             <!-- Cambiar rol -->
