@@ -121,8 +121,12 @@ def register():
 def login():
     if request.method == 'POST':
         u, p = request.form['username'], request.form['password']
+        # debug
+        app.logger.debug(f"Intentando authenticate() para usuario={u}")
         try:
             # 1) Autenticar contra LDAP
+            # debug
+            app.logger.debug(f"Resultado LDAP: status={result.status}, info={result.result}")
             result = ldap_manager.authenticate(u, p)
             if result.status != 'success':
                 flash('Credenciales LDAP inválidas', 'danger')
