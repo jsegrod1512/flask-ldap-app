@@ -5,6 +5,13 @@ from ldap3 import Server, Connection, SUBTREE
 import pymysql
 from functools import wraps
 
+# --- Mapeo de roles ---
+ROLE_MAP = {
+    1: 'Administradores',
+    2: 'Desarrolladores',
+    3: 'Clientes',
+}
+
 # --- App Setup ---
 app = Flask(__name__)
 app.config.from_object('config.Config')
@@ -49,8 +56,14 @@ def roles_required(*roles):
     def wrapper(fn):
         @wraps(fn)
         def decorated(*args, **kwargs):
-            if any(r in current_user.groups for r in roles) or \
-               (current_user.role_id and any(r == current_user.role_id for r in roles)):
+            # nombres de grupos LDAP
+            user_roles = set(current_user.groups)
+            # añade el rol de la BD (traducido a string)
+            if current_user.role_id in ROLE_MAP:
+                user_roles.add(ROLE_MAP[current_user.role_id])
+
+            # ahora compruebo sólo strings
+            if any(r in user_roles for r in roles):
                 return fn(*args, **kwargs)
             abort(403)
         return decorated
