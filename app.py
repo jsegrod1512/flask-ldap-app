@@ -78,19 +78,37 @@ def login():
             return render_template('login.html')
 
         # 2) Búsqueda manual de grupos usando memberUid
-        server = Server(app.config['LDAP_HOST'],
-                        port=app.config['LDAP_PORT'],
-                        use_ssl=app.config['LDAP_USE_SSL'])
-        conn = Connection(server,
-                          user=app.config['LDAP_BIND_USER_DN'],
-                          password=app.config['LDAP_BIND_USER_PASSWORD'],
-                          auto_bind=True)
+        try:
+            server = Server(
+                app.config['LDAP_HOST'],
+                port=app.config['LDAP_PORT'],
+                use_ssl=app.config['LDAP_USE_SSL']
+            )
+            conn = Connection(
+                server,
+                user=app.config['LDAP_BIND_USER_DN'],
+                password=app.config['LDAP_BIND_USER_PASSWORD'],
+                auto_bind=True
+            )
 
-        base = f"{app.config['LDAP_GROUP_DN']},{app.config['LDAP_BASE_DN']}"
-        flt  = f"(&(objectClass=posixGroup)(memberUid={u}))"
-        conn.search(base, flt, SUBTREE, attributes=['cn'])
-        groups = [e.cn.value for e in conn.entries]
-        conn.unbind()
+            base = f"{app.config['LDAP_GROUP_DN']},{app.config['LDAP_BASE_DN']}"
+            flt  = f"(&(objectClass=posixGroup)(memberUid={u}))"
+            app.logger.debug("MANUAL LDAP SEARCH → base=%s, filter=%s", base, flt)
+
+            ok = conn.search(base, flt, SUBTREE, attributes=['cn'])
+            if not ok:
+                app.logger.error("LDAP SEARCH FAILED: %s", conn.result)
+                groups = []
+            else:
+                groups = [entry.cn.value for entry in conn.entries]
+                app.logger.debug("LDAP SEARCH ENTRIES → %s", groups)
+
+            conn.unbind()
+        except Exception:
+            app.logger.exception("Error en búsqueda LDAP manual")
+            flash('Error interno al buscar grupos', 'danger')
+            return render_template('login.html')
+
 
         # 3) Determinar role_id
         if 'Administradores' in groups:
