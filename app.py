@@ -1,7 +1,6 @@
 import logging
 from flask import Flask, render_template, request, redirect, flash, url_for, session, abort
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
-from flask_ldap3_login import LDAP3LoginManager
 from ldap3 import Server, Connection, SUBTREE
 import pymysql
 from functools import wraps
@@ -11,16 +10,10 @@ app = Flask(__name__)
 app.config.from_object('config.Config')
 app.secret_key = app.config['SECRET_KEY']
 
-# Forzar nivel DEBUG en logger de la app
-default_log = logging.getLogger()
-default_log.setLevel(logging.DEBUG)
+# Forzar nivel DEBUG
+logging.basicConfig(level=logging.DEBUG)
 app.logger.setLevel(logging.DEBUG)
-
-# Logging librerías
 logging.getLogger('ldap3').setLevel(logging.DEBUG)
-
-# Inicializar extensión LDAP
-ldap_manager = LDAP3LoginManager(app)
 
 # Flask-Login
 login_manager = LoginManager(app)
@@ -71,22 +64,19 @@ def login():
         p = request.form['password']
         app.logger.debug('+++ LOGIN POST para usuario: %s', u)
 
-                # 1) Autenticación LDAP MANUAL
+        # 1) Bind manual LDAP con DN usuario
+        user_dn = f"uid={u},{app.config['LDAP_USER_DN']},{app.config['LDAP_BASE_DN']}"
         try:
-            # Intentamos bind directo con las credenciales del usuario
-            server = Server(
-                app.config['LDAP_HOST'],
-                port=app.config['LDAP_PORT'],
-                use_ssl=app.config['LDAP_USE_SSL']
-            )
-            conn = Connection(
-                server,
-                user=f"uid={u},{app.config['LDAP_USER_DN']},{app.config['LDAP_BASE_DN']}",
-                password=p,
-                auto_bind=True
-            )
+            server = Server(app.config['LDAP_HOST'],
+                            port=app.config['LDAP_PORT'],
+                            use_ssl=app.config['LDAP_USE_SSL'])
+            conn = Connection(server,
+                              user=user_dn,
+                              password=p,
+                              auto_bind=True)
+            app.logger.info("🔓 Bind exitoso para %s", user_dn)
         except Exception:
-            app.logger.warning('Credenciales LDAP inválidas para %s', u)
+            app.logger.warning("❌ Credenciales LDAP inválidas para %s", user_dn)
             flash('Credenciales LDAP inválidas', 'danger')
             return render_template('login.html')
 
@@ -94,7 +84,7 @@ def login():
         try:
             with conn:
                 base = f"{app.config['LDAP_GROUP_DN']},{app.config['LDAP_BASE_DN']}"
-                flt = f"(&(objectClass=posixGroup)(memberUid={u}))"
+                flt  = f"(&(objectClass=posixGroup)(memberUid={u}))"
                 app.logger.info('📁 LDAP search base=%s filter=%s', base, flt)
 
                 found = conn.search(base, flt, SUBTREE, attributes=['cn'])
@@ -105,43 +95,14 @@ def login():
                     groups = [e.cn.value for e in conn.entries]
                     app.logger.info('✅ Grupos encontrados: %s', groups)
 
-                flash(f"[DEBUG] grupos: {groups}", 'info')
-        except Exception:
-            app.logger.exception('💥 Error al buscar grupos LDAP')
-            flash('Error interno buscando tus grupos', 'danger')
-            return render_template('login.html')
-        try:
-            server = Server(
-                app.config['LDAP_HOST'],
-                port=app.config['LDAP_PORT'],
-                use_ssl=app.config['LDAP_USE_SSL']
-            )
-            with Connection(
-                server,
-                user=app.config['LDAP_BIND_USER_DN'],
-                password=app.config['LDAP_BIND_USER_PASSWORD'],
-                auto_bind=True
-            ) as conn:
-                base = f"{app.config['LDAP_GROUP_DN']},{app.config['LDAP_BASE_DN']}"
-                flt = f"(&(objectClass=posixGroup)(memberUid={u}))"
-                app.logger.info('📁 LDAP search base=%s filter=%s', base, flt)
-
-                found = conn.search(base, flt, SUBTREE, attributes=['cn'])
-                if not found or not conn.entries:
-                    app.logger.warning('❌ No se encontraron grupos para %s', u)
-                    groups = []
-                else:
-                    groups = [e.cn.value for e in conn.entries]
-                    app.logger.info('✅ Grupos encontrados: %s', groups)
-
-                # Mostrar en UI solo diagnóstico
+                # Diagnóstico en UI
                 flash(f"[DEBUG] grupos: {groups}", 'info')
         except Exception:
             app.logger.exception('💥 Error al buscar grupos LDAP')
             flash('Error interno buscando tus grupos', 'danger')
             return render_template('login.html')
 
-        # 3) Determinar role_id y continuar
+        # 3) Determinar role_id
         if 'Administradores' in groups:
             role_id = 1
         else:
@@ -154,9 +115,9 @@ def login():
             role_id = row['role_id']
 
         # 4) Crear user, guardar sesión y login
-        user = User(res.user_dn, u, groups, role_id)
+        user = User(user_dn, u, groups, role_id)
         session['user_info'] = {
-            'dn': res.user_dn,
+            'dn': user_dn,
             'username': u,
             'groups': groups,
             'role_id': role_id
@@ -170,7 +131,8 @@ def login():
 @app.route('/logout')
 @login_required
 def logout():
-    logout_user(); session.pop('user_info', None)
+    logout_user()
+    session.pop('user_info', None)
     flash('Sesión cerrada', 'info')
     return redirect(url_for('login'))
 
@@ -180,12 +142,17 @@ def register():
         u = request.form['username'].strip()
         # Verificar existencia en LDAP
         server = Server(app.config['LDAP_HOST'], port=app.config['LDAP_PORT'], use_ssl=app.config['LDAP_USE_SSL'])
-        conn = Connection(server, user=app.config['LDAP_BIND_USER_DN'], password=app.config['LDAP_BIND_USER_PASSWORD'], auto_bind=True)
-        conn.search(f"{app.config['LDAP_USER_DN']},{app.config['LDAP_BASE_DN']}", f"(uid={u})", SUBTREE, attributes=['uid'])
+        conn = Connection(server,
+                          user=app.config['LDAP_BIND_USER_DN'],
+                          password=app.config['LDAP_BIND_USER_PASSWORD'],
+                          auto_bind=True)
+        conn.search(f"{app.config['LDAP_USER_DN']},{app.config['LDAP_BASE_DN']}",
+                    f"(uid={u})", SUBTREE, attributes=['uid'])
         if not conn.entries:
             flash('Usuario no existe', 'danger')
             return redirect(url_for('register'))
         conn.unbind()
+
         # Alta en BD
         db = db_conn()
         with db.cursor() as c:
@@ -209,8 +176,12 @@ def index():
 @roles_required('Administradores')
 def admin_usuarios():
     server = Server(app.config['LDAP_HOST'], port=app.config['LDAP_PORT'], use_ssl=app.config['LDAP_USE_SSL'])
-    conn = Connection(server, user=app.config['LDAP_BIND_USER_DN'], password=app.config['LDAP_BIND_USER_PASSWORD'], auto_bind=True)
-    conn.search(f"{app.config['LDAP_USER_DN']},{app.config['LDAP_BASE_DN']}", '(uid=*)', SUBTREE, attributes=['uid'])
+    conn = Connection(server,
+                      user=app.config['LDAP_BIND_USER_DN'],
+                      password=app.config['LDAP_BIND_USER_PASSWORD'],
+                      auto_bind=True)
+    conn.search(f"{app.config['LDAP_USER_DN']},{app.config['LDAP_BASE_DN']}",
+                '(uid=*)', SUBTREE, attributes=['uid'])
     ldap_uids = [e.uid.value for e in conn.entries]
     conn.unbind()
 
